@@ -11,8 +11,15 @@
     "tailwind:init": "tailwindcss init -p"
   },
   "dependencies": {
+    "@react-three/drei": "^10.7.6",
+    "@react-three/fiber": "^9.3.0",
     "react": "^19.1.1",
-    "react-dom": "^19.1.1"
+    "react-dom": "^19.1.1",
+    "react-router-dom": "^7.9.4",
+    "react-tsparticles": "^2.12.2",
+    "three": "^0.180.0",
+    "tsparticles": "^3.9.1",
+    "tsparticles-engine": "^2.12.0"
   },
   "devDependencies": {
     "@eslint/js": "^9.36.0",
