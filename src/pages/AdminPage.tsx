@@ -6,12 +6,19 @@ type CeleryState = "PENDING" | "PROGRESS" | "SUCCESS" | "FAILURE" | "UNKNOWN";
 interface ProgressState {
   jobId: string;
   state: CeleryState;
-  status: string;                 
-  current: number;                
-  total: number;                  
-  interval_percentage: number;    
-  errorInfo?: string;             
-  symbol?: string;                
+  status: string;
+
+  current: number;
+  total: number;
+  interval_percentage: number;
+
+  chunk_current?: number;
+  chunk_total?: number;
+  chunk_pct?: number;
+
+  errorInfo?: string;
+  symbol?: string;
+  interval?: string;
 }
 
 const API_URL = "http://localhost:8080";
@@ -19,22 +26,17 @@ const POLLING_INTERVAL = 3000; // 3초
 
 const AdminPage: React.FC = () => {
   const [registerMessage, setRegisterMessage] = useState("");
-  const [loading, setLoading] = useState(false); // 버튼 로딩
+  const [loading, setLoading] = useState(false);
 
-  /** symbol → 진행 상태*/
   const [progressMap, setProgressMap] = useState<Record<string, ProgressState>>({});
-  /** symbol → job_id*/
   const [symbolJobMap, setSymbolJobMap] = useState<Record<string, string>>({});
-  /** job_id 목록 */
   const [jobIds, setJobIds] = useState<string[]>([]);
 
-  /** 최신 상태를 참조하기 위한 ref */
   const progressMapRef = useRef(progressMap);
   useEffect(() => { progressMapRef.current = progressMap; }, [progressMap]);
 
   const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
-  /** 종목 등록 */
   const handleRegisterSymbols = async () => {
     setLoading(true);
     setRegisterMessage("");
@@ -49,14 +51,12 @@ const AdminPage: React.FC = () => {
     }
   };
 
-  /** 모든 종목 백필 시작 */
   const handleBackfill = async () => {
     setLoading(true);
     setProgressMap({});
     setSymbolJobMap({});
     setJobIds([]);
 
-    // 기존 폴링 중지
     if (pollIntervalRef.current) {
       clearInterval(pollIntervalRef.current);
       pollIntervalRef.current = null;
@@ -75,7 +75,6 @@ const AdminPage: React.FC = () => {
         throw new Error("백엔드 응답에 symbol_job_map 또는 job_ids가 없습니다.");
       }
 
-      // 초기 진행 상태 구성
       const initial: Record<string, ProgressState> = {};
       for (const [symbol, jobId] of Object.entries(symbol_job_map)) {
         initial[symbol] = {
@@ -83,9 +82,14 @@ const AdminPage: React.FC = () => {
           state: "PENDING",
           status: "대기 중...",
           current: 0,
-          total: 6, // 1m,5m,15m,1h,4h,1d
+          total: 6,
           interval_percentage: 0,
+
+          chunk_current: 0,
+          chunk_total: 0,
+          chunk_pct: 0,
           symbol,
+          interval: undefined,
         };
       }
 
@@ -93,7 +97,6 @@ const AdminPage: React.FC = () => {
       setSymbolJobMap(symbol_job_map);
       setJobIds(job_ids);
 
-      // 즉시 1회 폴링 + 주기 폴링
       await pollBulkStatuses(job_ids, symbol_job_map);
       pollIntervalRef.current = setInterval(
         () => pollBulkStatuses(job_ids, symbol_job_map),
@@ -101,14 +104,12 @@ const AdminPage: React.FC = () => {
       );
     } catch (err: any) {
       console.error(err);
-      // 에러를 모든 심볼에 일괄 표시하진 않고, 상단 메시지로 충분하면 스킵 가능
       alert(`백필 시작 실패: ${err?.message || "알 수 없는 오류"}`);
     } finally {
       setLoading(false);
     }
   };
 
-  /** 벌크 상태 폴링 */
   const pollBulkStatuses = async (
     ids: string[],
     symToJob: Record<string, string>
@@ -120,7 +121,6 @@ const AdminPage: React.FC = () => {
         job_ids: ids,
       });
 
-      // 응답: { summary, items: [ { job_id, state, status, current, total, interval_percentage, error_info, symbol }, ... ] }
       const items = (data?.items || []) as Array<{
         job_id: string;
         state: CeleryState;
@@ -130,22 +130,24 @@ const AdminPage: React.FC = () => {
         interval_percentage?: number;
         error_info?: string;
         symbol?: string;
+        interval?: string;
+
+        chunk_current?: number;
+        chunk_total?: number;
+        chunk_pct?: number;
       }>;
 
       if (!Array.isArray(items)) return;
 
-      // job_id → symbol 역 인덱스
       const jobToSymbol: Record<string, string> = {};
       for (const [s, jid] of Object.entries(symToJob)) jobToSymbol[jid] = s;
 
-      // 상태 갱신
       setProgressMap((prev) => {
         const next = { ...prev };
         for (const it of items) {
           const symbol = jobToSymbol[it.job_id] || it.symbol || "UNKNOWN";
           const prevRow = next[symbol];
 
-          // 이미 성공/실패면 덮어쓸 필요는 없지만, 혹시 보강 정보가 있으면 업데이트
           const alreadyDone =
             prevRow &&
             (prevRow.state === "SUCCESS" || prevRow.state === "FAILURE");
@@ -160,11 +162,25 @@ const AdminPage: React.FC = () => {
               typeof it.interval_percentage === "number"
                 ? it.interval_percentage
                 : prevRow?.interval_percentage ?? 0,
+
+            chunk_current:
+              typeof it.chunk_current === "number"
+                ? it.chunk_current
+                : prevRow?.chunk_current ?? 0,
+            chunk_total:
+              typeof it.chunk_total === "number"
+                ? it.chunk_total
+                : prevRow?.chunk_total ?? 0,
+            chunk_pct:
+              typeof it.chunk_pct === "number"
+                ? it.chunk_pct
+                : prevRow?.chunk_pct ?? 0,
+
+            interval: it.interval ?? prevRow?.interval,
             errorInfo: it.error_info,
             symbol,
           };
 
-          // 이미 완료된 항목은 유지
           if (alreadyDone && row.state !== "FAILURE" && row.state !== "SUCCESS") {
             continue;
           }
@@ -173,7 +189,6 @@ const AdminPage: React.FC = () => {
         return next;
       });
 
-      // 모두 종료되었는지 확인 → 폴링 중단
       const allDone = items.every(
         (it) => it.state === "SUCCESS" || it.state === "FAILURE"
       );
@@ -183,11 +198,9 @@ const AdminPage: React.FC = () => {
       }
     } catch (err) {
       console.error("벌크 상태 폴링 오류:", err);
-      // 네트워크 오류 시 다음 주기에 재시도
     }
   };
 
-  // 언마운트 시 폴링 중단
   useEffect(() => {
     return () => {
       if (pollIntervalRef.current) {
@@ -196,14 +209,14 @@ const AdminPage: React.FC = () => {
     };
   }, []);
 
-  /** 테이블 렌더를 위한 정렬된 행 */
   const rows = useMemo(() => {
     const entries = Object.entries(progressMap);
     entries.sort((a, b) => a[0].localeCompare(b[0]));
     return entries.map(([symbol, p], idx) => {
       const overall =
         p.total > 0 ? Math.min(100, Math.max(0, (p.current / p.total) * 100)) : 0;
-      return { idx: idx + 1, symbol, p, overall };
+      const chunkPct = Math.round(p.chunk_pct ?? 0);
+      return { idx: idx + 1, symbol, p, overall, chunkPct };
     });
   }, [progressMap]);
 
@@ -211,7 +224,6 @@ const AdminPage: React.FC = () => {
     <div className="flex flex-col items-center justify-center w-screen min-h-screen p-8 bg-gray-900 text-white">
       <h1 className="text-3xl font-bold mb-6">DB 관리</h1>
 
-      {/* 종목 불러오기 */}
       <div className="bg-gray-800 p-6 rounded-lg w-full max-w-lg text-center shadow-xl border border-gray-700 mb-8">
         <h2 className="text-lg font-semibold mb-4 text-cyan-400">1. 종목 불러오기</h2>
         <button
@@ -231,7 +243,6 @@ const AdminPage: React.FC = () => {
         )}
       </div>
 
-      {/* 백필 */}
       <div className="bg-gray-800 p-6 rounded-lg w-full max-w-5xl text-center shadow-xl border border-gray-700">
         <h2 className="text-lg font-semibold mb-4 text-green-400">2. OHLCV 데이터 백필</h2>
         <button
@@ -244,10 +255,9 @@ const AdminPage: React.FC = () => {
           {loading ? "작업 시작 중..." : "모든 종목 백필 시작"}
         </button>
 
-        {/* 진행 현황 리스트 */}
         {rows.length > 0 && (
           <div className="mt-6 text-left space-y-4 max-h-[600px] overflow-y-auto pr-2">
-            {rows.map(({ idx, symbol, p, overall }) => (
+            {rows.map(({ idx, symbol, p, overall, chunkPct }) => (
               <div
                 key={symbol}
                 className={`p-4 rounded-lg ${
@@ -291,14 +301,22 @@ const AdminPage: React.FC = () => {
                       />
                     </div>
 
-                    {/* 현재 인터벌 상세 진행률 */}
+                    {/* 현재 인터벌 상세 진행률 (chunk) */}
                     {p.state === "PROGRESS" && (
-                      <div className="w-full bg-gray-600 rounded-full h-2.5">
-                        <div
-                          className="bg-green-500 h-2.5 rounded-full transition-all duration-300"
-                          style={{ width: `${Math.round(p.interval_percentage)}%` }}
-                        />
-                      </div>
+                      <>
+                        <div className="flex items-center justify-between text-xs text-gray-300 mt-1">
+                          <span>{p.interval || "-"}</span>
+                          <span>
+                            {(p.chunk_current ?? 0)}/{(p.chunk_total ?? 0)} · {chunkPct}%
+                          </span>
+                        </div>
+                        <div className="w-full bg-gray-600 rounded-full h-2.5">
+                          <div
+                            className="bg-green-500 h-2.5 rounded-full transition-all duration-300"
+                            style={{ width: `${chunkPct}%` }}
+                          />
+                        </div>
+                      </>
                     )}
                   </>
                 )}
