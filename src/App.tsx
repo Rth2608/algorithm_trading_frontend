@@ -1,8 +1,7 @@
 import React from "react";
 import { Routes, Route } from "react-router-dom";
 
-const GOOGLE_CLIENT_ID =
-  "674131826959-3bo3bg1mh8rfnibqfokdd7l6q1n015pj.apps.googleusercontent.com";
+const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID;
 const BACKEND_BASE_URL = import.meta.env.VITE_BACKEND_URL || "http://localhost:8080";
 
 const handleGoogleLogin = () => {
