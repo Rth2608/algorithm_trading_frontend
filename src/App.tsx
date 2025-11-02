@@ -2,6 +2,9 @@ import React from "react";
 import { Routes, Route, useNavigate } from "react-router-dom";
 import SignupPage from "./pages/SignupPage";
 
+const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID;
+const BACKEND_BASE_URL = import.meta.env.VITE_BACKEND_URL || "http://localhost:8080";
+
 // 로그인 페이지
 const LogInIcon = (props: React.SVGProps<SVGSVGElement>) => (
     <svg {...props} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -22,7 +25,16 @@ const UserPlusIcon = (props: React.SVGProps<SVGSVGElement>) => (
 //구글 로그인 버튼 눌렀을 시
 function getEnvVars() {
     const handleGoogleLogin = () => {
-        window.location.href = "https://www.google.com/404";
+      const redirect_uri = `${BACKEND_BASE_URL}/auth/google/callback`;
+      const scope = encodeURIComponent(
+        "openid email profile https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile"
+      );
+      const response_type = "code";
+    
+      const googleAuthURL = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${GOOGLE_CLIENT_ID}&redirect_uri=${redirect_uri}&response_type=${response_type}&scope=${scope}&access_type=offline&prompt=consent`;
+    
+      console.log("Redirecting to:", googleAuthURL);
+      window.location.href = googleAuthURL;
     };
     return { handleGoogleLogin };
 }
