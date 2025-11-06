@@ -1,58 +1,41 @@
-import React, { ReactElement, useEffect, useState } from "react";
-import { Navigate, useLocation } from "react-router-dom";
+import { Navigate, Outlet, useLocation } from "react-router-dom";
 import { jwtDecode } from "jwt-decode";
 
-interface JwtPayload {
-  exp: number;
+const TOKEN_KEY = "jwt_token";
+
+type JwtPayload = { exp?: number };
+
+export default function ProtectedRoute() {
+  const loc = useLocation();
+
+  // 1) 혹시 URL로 /main?jwt_token=... 식으로 들어온 경우 먼저 흡수
+  const qs = new URLSearchParams(loc.search);
+  const urlToken = qs.get("jwt_token") || qs.get("token");
+  if (urlToken) {
+    localStorage.setItem(TOKEN_KEY, urlToken);
+    qs.delete("jwt_token"); qs.delete("token");
+    const clean = qs.toString();
+    window.history.replaceState(
+      null,
+      "",
+      clean ? `${loc.pathname}?${clean}` : loc.pathname
+    );
+  }
+
+  // 2) 저장된 토큰 확인 + 만료 검사
+  const token = localStorage.getItem(TOKEN_KEY);
+  if (!token) return <Navigate to="/" replace state={{ from: loc }} />;
+
+  try {
+    const { exp } = jwtDecode<JwtPayload>(token);
+    if (exp && exp * 1000 <= Date.now()) {
+      localStorage.removeItem(TOKEN_KEY);
+      return <Navigate to="/" replace />;
+    }
+  } catch {
+    localStorage.removeItem(TOKEN_KEY);
+    return <Navigate to="/" replace />;
+  }
+
+  return <Outlet />;
 }
-
-const ProtectedRoute = ({ children }: { children: ReactElement }) => {
-  const location = useLocation();
-  const [checked, setChecked] = useState(false);
-  const [isValid, setIsValid] = useState(false);
-
-  useEffect(() => {
-    let token = localStorage.getItem("jwt_token");
-
-    // URL 파라미터에서도 token 탐색
-    const params = new URLSearchParams(location.search);
-    const tokenFromURL = params.get("token");
-
-    if (tokenFromURL && !token) {
-      localStorage.setItem("jwt_token", tokenFromURL);
-      token = tokenFromURL;
-      // 주소창 정리 (token 쿼리 제거)
-      window.history.replaceState({}, document.title, location.pathname);
-    }
-
-    if (!token) {
-      setChecked(true);
-      return;
-    }
-
-    try {
-      const decoded = jwtDecode<JwtPayload>(token);
-      const now = Date.now() / 1000;
-      if (decoded.exp > now) {
-        setIsValid(true);
-      } else {
-        localStorage.removeItem("jwt_token");
-      }
-    } catch {
-      localStorage.removeItem("jwt_token");
-    }
-
-    setChecked(true);
-  }, [location]);
-
-  // 아직 토큰 검사 중이면 렌더링 지연
-  if (!checked) return null;
-
-  // 유효하지 않은 토큰은 로그인 페이지로
-  if (!isValid) return <Navigate to="/" replace />;
-
-  // 유효한 경우에만 children 렌더링
-  return children;
-};
-
-export default ProtectedRoute;
